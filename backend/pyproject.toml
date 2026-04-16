@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.26",
     "soundfile>=0.12",
     "scikit-learn>=1.4",
+    "torchcodec>=0.11",
 ]
 
 [project.optional-dependencies]

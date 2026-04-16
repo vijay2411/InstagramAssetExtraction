@@ -1,15 +1,40 @@
 from __future__ import annotations
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from app.pipeline.base import JobContext, StageResult, StageEvent
 from app.core.errors import StageError
 
 
+# Lines matching this pattern are tqdm progress bars — they drown out the
+# actual traceback when surfaced in an error message. Filter them out.
+_TQDM_LINE = re.compile(r"^\s*\d+%\|[\s\S]*?\|\s*[\d.]+/[\d.]+\s*\[[^\]]+\]\s*$")
+
+
+def _clean_stderr_tail(stderr: str, limit: int = 500) -> str:
+    """Return the last ~500 chars of stderr with tqdm progress lines removed.
+    This surfaces the actual Python traceback instead of progress noise."""
+    if not stderr:
+        return "(no stderr)"
+    # tqdm uses carriage returns to overwrite — split on \r AND \n
+    parts: list[str] = []
+    for line in re.split(r"[\r\n]+", stderr):
+        line = line.strip()
+        if not line:
+            continue
+        if _TQDM_LINE.match(line):
+            continue
+        parts.append(line)
+    tail = "\n".join(parts)[-limit:]
+    return tail or stderr.strip()[-limit:]
+
+
 def _run_demucs(audio_path: Path, out_dir: Path, model: str, device: str) -> None:
     """Actual Demucs invocation. Isolated so tests can mock it."""
     cmd = [
-        "python", "-m", "demucs",
+        sys.executable, "-m", "demucs",
         "-n", model,
         "-d", device,
         "--two-stems=vocals",
@@ -18,7 +43,7 @@ def _run_demucs(audio_path: Path, out_dir: Path, model: str, device: str) -> Non
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise StageError(f"demucs failed: {proc.stderr.strip()[:300]}")
+        raise StageError(f"demucs failed ({device}): {_clean_stderr_tail(proc.stderr)}")
 
 
 class SpeechStage:
@@ -34,7 +59,22 @@ class SpeechStage:
         ctx.emit(StageEvent(type="progress", stage=self.name, progress=0.0, message=f"running {model} on {device}"))
 
         demucs_out = ctx.job_dir / "_demucs"
-        _run_demucs(audio, demucs_out, model, device)
+        try:
+            _run_demucs(audio, demucs_out, model, device)
+        except StageError as err:
+            # MPS can OOM on long/heavy audio. Fall back to CPU once before giving up.
+            msg = str(err.message).lower()
+            mps_oom = device == "mps" and any(
+                token in msg for token in ("mps", "out of memory", "allocator", "cannot allocate")
+            )
+            if not mps_oom:
+                raise
+            shutil.rmtree(demucs_out, ignore_errors=True)
+            ctx.emit(StageEvent(
+                type="progress", stage=self.name, progress=0.0,
+                message="MPS failed — retrying on CPU (slower)",
+            ))
+            _run_demucs(audio, demucs_out, model, "cpu")
 
         vocals = _find(demucs_out, "vocals.wav")
         no_vocals = _find(demucs_out, "no_vocals.wav")
