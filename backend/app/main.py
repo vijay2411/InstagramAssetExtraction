@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import health, config, jobs, assets
+from app.api import health, config, jobs, assets, ws
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ExtractAssets")
@@ -7,6 +7,7 @@ def create_app() -> FastAPI:
     app.include_router(config.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(assets.router, prefix="/api")
+    app.include_router(ws.router)
     return app
 
 app = create_app()
