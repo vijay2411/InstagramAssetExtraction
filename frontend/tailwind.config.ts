@@ -1,6 +1,10 @@
 import type { Config } from 'tailwindcss';
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  safelist: [
+    'bg-speech', 'bg-music', 'bg-sfx', 'bg-accent',
+    'border-speech', 'border-music', 'border-sfx', 'border-accent',
+  ],
   theme: {
     extend: {
       colors: {
