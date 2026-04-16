@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body { @apply antialiased; letter-spacing: -0.01em; font-feature-settings: 'cv11', 'ss01'; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+}
