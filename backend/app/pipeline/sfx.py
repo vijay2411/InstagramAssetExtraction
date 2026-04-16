@@ -10,10 +10,14 @@ from app.pipeline.base import JobContext, StageResult, StageEvent
 from app.core.errors import StageError
 
 N_MFCC = 13
-CLUSTER_DIST_THRESHOLD = 0.01  # cosine distance; spec suggested 0.35 but synthetic
-# signal shows 800Hz vs 2000Hz beep distance is only ~0.011, so 0.35 collapses
-# all clips into one cluster. 0.01 sits cleanly between intra-800Hz distance
-# (~0.0005) and the 800Hz-vs-2000Hz distance (~0.011).
+
+# cosine distance threshold for cluster membership. This is a hyperparameter
+# that will need tuning against real-world SFX in the e2e test (Task 27) — the
+# default 0.35 is sized for the wide MFCC distributions of real audio (clicks,
+# whooshes, musical hits). Synthetic pure-tone tests use a much tighter value
+# (~0.01) because sinusoid MFCC vectors are unusually close. Callers override
+# this via ctx.params["cluster_dist_threshold"].
+DEFAULT_CLUSTER_DIST_THRESHOLD = 0.35
 
 class SfxStage:
     name = "sfx"
@@ -26,6 +30,9 @@ class SfxStage:
         min_members = int(ctx.params.get("min_cluster_size", 2))
         clip_min_ms = int(ctx.params.get("clip_min_ms", 300))
         clip_max_ms = int(ctx.params.get("clip_max_ms", 1500))
+        dist_threshold = float(
+            ctx.params.get("cluster_dist_threshold", DEFAULT_CLUSTER_DIST_THRESHOLD)
+        )
 
         ctx.emit(StageEvent(type="progress", stage=self.name, progress=0.0, message="loading audio"))
 
@@ -66,7 +73,7 @@ class SfxStage:
             dist = cosine_distances(feats)
             algo = AgglomerativeClustering(
                 n_clusters=None,
-                distance_threshold=CLUSTER_DIST_THRESHOLD,
+                distance_threshold=dist_threshold,
                 metric="precomputed",
                 linkage="average",
             )
