@@ -11,8 +11,10 @@ def _fake_wav(p: Path, dur_s: float):
     sf.write(str(p), np.zeros((int(SR * dur_s), 2), dtype=np.float32), SR)
 
 def test_finalize_writes_manifest(tmp_path: Path):
-    # Fake prior-stage outputs
-    _fake_wav(tmp_path / "source.mp4", 2.0)
+    # Fake prior-stage outputs. The mp4 only needs to exist as a path target;
+    # _duration() returns 0.0 on unreadable files and the test doesn't assert
+    # on video duration, so a stub byte file is sufficient.
+    (tmp_path / "source.mp4").write_bytes(b"\x00" * 64)
     _fake_wav(tmp_path / "speech.wav", 2.0)
     _fake_wav(tmp_path / "music.wav", 2.0)
     sfx_dir = tmp_path / "sfx"
