@@ -1,11 +1,15 @@
+import { Aurora } from '@/components/Aurora';
 import { LeftPanel } from '@/components/LeftPanel';
 import { RightPanel } from '@/components/RightPanel';
 
 export default function App() {
   return (
-    <div className="min-h-screen grid grid-cols-[320px_1fr]">
-      <LeftPanel />
-      <RightPanel />
-    </div>
+    <>
+      <Aurora />
+      <div className="relative min-h-screen grid grid-cols-[360px_1fr]">
+        <LeftPanel />
+        <RightPanel />
+      </div>
+    </>
   );
 }

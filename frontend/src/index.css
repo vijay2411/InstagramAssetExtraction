@@ -3,6 +3,76 @@
 @tailwind utilities;
 
 @layer base {
-  html, body { @apply antialiased; letter-spacing: -0.01em; font-feature-settings: 'cv11', 'ss01'; }
-  body { font-family: 'Inter', system-ui, sans-serif; }
+  html, body {
+    @apply antialiased;
+    font-family: 'Geist', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    font-feature-settings: 'ss01', 'ss02', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #0b0908;
+    color: #faf7f2;
+  }
+  body { overflow-x: hidden; }
+
+  /* Display type = Fraunces with optical size and slight soft axis */
+  .font-display {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-variation-settings: 'opsz' 144, 'SOFT' 30, 'WONK' 0;
+  }
+  .font-display-wonk {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-variation-settings: 'opsz' 144, 'SOFT' 70, 'WONK' 1;
+  }
+}
+
+@layer utilities {
+  /* Layered ambient background: three soft blurred gradient orbs that drift.
+     Each orb is absolutely positioned by Aurora component; these keyframes
+     drive the drift so we don't re-render from JS. */
+  .aurora-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    mix-blend-mode: screen;
+    pointer-events: none;
+    will-change: transform, opacity;
+  }
+
+  /* Very subtle static film grain — rendered once as a data-URI SVG. */
+  .noise-grain {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.97  0 0 0 0 0.94  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+  }
+
+  /* Precision dot grid — gives the workspace a draftsman feel. */
+  .dot-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(250,247,242,0.05) 1px, transparent 0);
+    background-size: 28px 28px;
+    background-position: -4px -4px;
+  }
+
+  /* Shimmer effect for progress bars and key interactions. */
+  .shimmer-ember {
+    background: linear-gradient(90deg, transparent 0%, rgba(232,177,58,0.25) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 3s linear infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+  }
+
+  /* Scrollbar — thin, warm, restrained. */
+  ::-webkit-scrollbar           { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track     { background: transparent; }
+  ::-webkit-scrollbar-thumb     { background: #2a2520; border-radius: 999px; border: 2px solid #0b0908; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a342c; }
+
+  /* Selection */
+  ::selection { background: rgba(232,177,58,0.25); color: #faf7f2; }
+
+  /* Tabular numerics utility */
+  .tabular { font-variant-numeric: tabular-nums; }
 }

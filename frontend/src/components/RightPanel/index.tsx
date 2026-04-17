@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'motion/react';
 import { useJobStore } from '@/hooks/useJobStore';
 import { useJobSocket } from '@/hooks/useJobSocket';
 import { IdleState } from './IdleState';
@@ -11,23 +12,48 @@ export function RightPanel() {
   const jobDirName = useJobStore((s) => s.jobDirName);
   const error = useJobStore((s) => s.error);
 
+  const key = status === 'done' && manifest ? 'results' :
+              status === 'running' || status === 'error' ? 'processing' :
+              'idle';
+
   return (
-    <main className="p-6 overflow-auto">
-      {status === 'idle' && <IdleState />}
-      {(status === 'running' || status === 'error') && (
-        <div className="space-y-4">
-          <ProcessingState />
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-sm text-red-400">
-              <div className="font-medium mb-1">{error.stage} failed</div>
-              <div className="text-xs">{error.message}</div>
+    <main className="relative overflow-auto">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={key}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {key === 'idle' && <IdleState />}
+          {key === 'processing' && (
+            <div>
+              <ProcessingState />
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mx-10 mb-10 -mt-2 rounded-xl border border-coral/40 bg-coral/5 p-5"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-coral" />
+                    <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-coral">
+                      {error.stage} · error
+                    </div>
+                  </div>
+                  <div className="font-mono text-[11px] text-coral/90 whitespace-pre-wrap break-words leading-relaxed">
+                    {error.message}
+                  </div>
+                </motion.div>
+              )}
             </div>
           )}
-        </div>
-      )}
-      {status === 'done' && manifest && jobDirName && (
-        <ResultsState manifest={manifest} jobDirName={jobDirName} />
-      )}
+          {key === 'results' && manifest && jobDirName && (
+            <ResultsState manifest={manifest} jobDirName={jobDirName} />
+          )}
+        </motion.div>
+      </AnimatePresence>
     </main>
   );
 }

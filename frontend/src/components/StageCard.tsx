@@ -13,20 +13,23 @@ export type StageCardStatus = 'pending' | 'running' | 'done' | 'error';
 
 interface Props {
   title: string;
+  subtitle?: string;
   status: StageCardStatus;
   progress: number;
   message?: string;
   errorMessage?: string;
-  color: string; // tailwind segment: 'speech' | 'music' | 'sfx' | 'accent'
+  color: string; // tailwind segment: 'speech' | 'music' | 'sfx' | 'ember'
 }
 
 // Hex for our brand colors so motion can derive gradients procedurally.
 // (These match tailwind.config.ts exactly.)
 const COLOR_HEX: Record<string, { base: string; bright: string }> = {
-  accent: { base: '#7c83ff', bright: '#aab0ff' },
-  speech: { base: '#60a5fa', bright: '#93c5fd' },
-  sfx:    { base: '#f472b6', bright: '#fb9cc9' },
-  music:  { base: '#fbbf24', bright: '#fde68a' },
+  ember:  { base: '#e8b13a', bright: '#ffc85a' },
+  speech: { base: '#80b5ff', bright: '#b4d1ff' },
+  sfx:    { base: '#ff8a5b', bright: '#ffb089' },
+  music:  { base: '#e8b13a', bright: '#ffc85a' },
+  // legacy alias
+  accent: { base: '#e8b13a', bright: '#ffc85a' },
 };
 
 const BAR_COUNT = 40;
@@ -131,59 +134,107 @@ function WaveAnim({ colorKey }: { colorKey: string }) {
   );
 }
 
-export function StageCard({ title, status, progress, message, errorMessage, color }: Props) {
+export function StageCard({ title, subtitle, status, progress, message, errorMessage, color }: Props) {
+  const isRunning = status === 'running';
+  const isDone = status === 'done';
+  const isError = status === 'error';
+
   const borderClass =
-    status === 'done' ? 'border-good/50' :
-    status === 'error' ? 'border-red-500/60' :
-    status === 'running' ? `border-${color}` :
-    'border-border-soft';
+    isDone ? 'border-good/40' :
+    isError ? 'border-coral/60' :
+    isRunning ? `border-${color}/60` :
+    'border-border/70';
+
+  const bgClass =
+    isDone ? 'bg-surface/60' :
+    isRunning ? 'bg-surface/80' :
+    'bg-surface/30';
 
   return (
     <motion.div
       layout
-      className={`bg-surface-2 border ${borderClass} rounded-xl p-4 space-y-3`}
-      transition={{ duration: 0.2 }}
+      className={`relative overflow-hidden rounded-2xl border ${borderClass} ${bgClass} backdrop-blur-xl p-5 transition-colors`}
+      transition={{ duration: 0.25 }}
     >
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{title}</div>
-        <StatusDot status={status} color={color} />
+      {/* Left color bar — stage accent */}
+      <div
+        className={`absolute left-0 top-0 bottom-0 w-[3px] bg-${color} opacity-60 ${isRunning ? 'shadow-[0_0_24px] shadow-' + color + '/60' : ''}`}
+      />
+
+      <div className="flex items-start gap-4 pl-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-3">
+            <h3 className="font-display text-xl font-medium tracking-tighter text-text">{title}</h3>
+            {subtitle && (
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-mute/80 truncate">
+                {subtitle}
+              </div>
+            )}
+          </div>
+        </div>
+        <StatusBadge status={status} color={color} progress={progress} />
       </div>
 
-      {status === 'running' && (
-        <>
+      {isRunning && (
+        <div className="mt-4 pl-2 space-y-3">
           <WaveAnim colorKey={color} />
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-1 bg-surface-3 rounded overflow-hidden">
-              <motion.div
-                className={`h-full bg-${color}`}
-                animate={{ width: `${Math.round(progress * 100)}%` }}
-                transition={{ duration: 0.3 }}
-              />
-            </div>
-            <div className="text-[11px] tabular-nums text-text-mute font-mono shrink-0">
-              {Math.round(progress * 100)}%
-            </div>
-          </div>
           {message && (
-            <div className="text-[11px] text-text-mute truncate" title={message}>
+            <div className="font-mono text-[10.5px] text-text-mute truncate tracking-tight" title={message}>
               {message}
             </div>
           )}
-        </>
-      )}
-      {status === 'error' && (
-        <div className="text-[11px] text-red-400 whitespace-pre-wrap break-words leading-relaxed max-h-32 overflow-auto font-mono">
-          {errorMessage}
         </div>
       )}
-      {status === 'done' && <div className="text-[11px] text-good">Done</div>}
+      {isError && (
+        <div className="mt-4 pl-2">
+          <div className="font-mono text-[11px] text-coral whitespace-pre-wrap break-words leading-relaxed max-h-32 overflow-auto rounded-lg bg-coral/5 border border-coral/20 p-3">
+            {errorMessage}
+          </div>
+        </div>
+      )}
+      {isDone && (
+        <div className="mt-3 pl-2 font-mono text-[10px] uppercase tracking-[0.2em] text-good/80">
+          done
+        </div>
+      )}
     </motion.div>
   );
 }
 
-function StatusDot({ status, color }: { status: StageCardStatus; color: string }) {
-  if (status === 'done') return <div className="w-2 h-2 rounded-full bg-good" />;
-  if (status === 'error') return <div className="w-2 h-2 rounded-full bg-red-500" />;
-  if (status === 'running') return <div className={`w-2 h-2 rounded-full bg-${color} animate-pulse`} />;
-  return <div className="w-2 h-2 rounded-full bg-text-mute/40" />;
+function StatusBadge({
+  status,
+  color,
+  progress,
+}: {
+  status: StageCardStatus;
+  color: string;
+  progress: number;
+}) {
+  if (status === 'done') {
+    return (
+      <div className="w-8 h-8 rounded-full bg-good/15 border border-good/40 grid place-items-center">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 6.5l2.5 2.5L9.5 3.5" stroke="#6ad99a" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <div className="w-8 h-8 rounded-full bg-coral/15 border border-coral/40 grid place-items-center">
+        <div className="w-3 h-[1.5px] bg-coral rounded-full" />
+      </div>
+    );
+  }
+  if (status === 'running') {
+    return (
+      <div className="shrink-0 flex items-center gap-2">
+        <div className="font-mono text-[11px] tabular text-text">
+          {Math.round(progress * 100)}%
+        </div>
+        <div className={`w-2.5 h-2.5 rounded-full bg-${color} animate-pulse shadow-[0_0_12px] shadow-${color}/80`} />
+      </div>
+    );
+  }
+  return <div className="w-2 h-2 rounded-full bg-text-mute/30" />;
 }
