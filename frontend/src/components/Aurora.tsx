@@ -13,22 +13,25 @@ import { createNoise2D } from 'simplex-noise';
  */
 export function Aurora() {
   return (
-    <div className="fixed inset-0 -z-10 overflow-hidden bg-bg">
-      {/* Deep warm base wash */}
+    // z-0, not -z-10 — previously the body's bg-bg covered the orbs entirely.
+    // Aurora paints the base color itself so we don't need body bg.
+    <div className="fixed inset-0 z-0 overflow-hidden bg-bg pointer-events-none">
+      {/* Deep warm base wash — two dominant color pools plus a vertical gradient */}
       <div
-        className="absolute inset-0 opacity-90"
+        className="absolute inset-0"
         style={{
           background:
-            'radial-gradient(1200px 800px at 30% 20%, rgba(232,177,58,0.10), transparent 60%),' +
-            'radial-gradient(900px 700px at 80% 90%, rgba(255,138,91,0.08), transparent 55%),' +
-            'linear-gradient(180deg, #0b0908 0%, #120e0a 100%)',
+            'radial-gradient(1400px 900px at 25% 15%, rgba(232,177,58,0.18), transparent 62%),' +
+            'radial-gradient(1100px 800px at 82% 88%, rgba(255,138,91,0.14), transparent 58%),' +
+            'radial-gradient(900px 700px at 50% 50%, rgba(159,76,109,0.10), transparent 65%),' +
+            'linear-gradient(180deg, #0b0908 0%, #15100b 50%, #0b0908 100%)',
         }}
       />
 
-      {/* Three drifting orbs */}
-      <DriftOrb seed={3}  color="#e8b13a" size={640} baseX="18vw" baseY="22vh" />
-      <DriftOrb seed={11} color="#ff8a5b" size={560} baseX="72vw" baseY="68vh" speed={0.35} />
-      <DriftOrb seed={19} color="#9f4c6d" size={720} baseX="46vw" baseY="52vh" speed={0.22} />
+      {/* Three drifting orbs — stronger alpha now that we're above body bg */}
+      <DriftOrb seed={3}  color="#e8b13a" size={720} baseX="18vw" baseY="22vh" />
+      <DriftOrb seed={11} color="#ff8a5b" size={640} baseX="78vw" baseY="72vh" speed={0.35} />
+      <DriftOrb seed={19} color="#9f4c6d" size={820} baseX="46vw" baseY="52vh" speed={0.22} />
 
       {/* Texture overlays */}
       <div className="absolute inset-0 dot-grid" />
@@ -81,7 +84,7 @@ function DriftOrb({ seed, color, size, baseX, baseY, speed = 0.5 }: OrbProps) {
         top:  `calc(${baseY} - ${size / 2}px)`,
         x: tx,
         y: ty,
-        background: `radial-gradient(circle at 50% 50%, ${color}44 0%, ${color}22 40%, transparent 70%)`,
+        background: `radial-gradient(circle at 50% 50%, ${color}66 0%, ${color}33 40%, transparent 72%)`,
       }}
     />
   );

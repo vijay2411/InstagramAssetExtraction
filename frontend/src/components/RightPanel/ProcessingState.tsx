@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { useJobStore } from '@/hooks/useJobStore';
 import { StageCard, type StageCardStatus } from '@/components/StageCard';
+import { PluckToy } from '@/components/PluckToy';
 import type { StageName } from '@/lib/api';
 
 // UI shows 4 cards; map each to 1+ pipeline stages.
@@ -63,6 +64,14 @@ export function ProcessingState() {
           );
         })}
       </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <PluckToy />
+      </motion.div>
     </div>
   );
 }
