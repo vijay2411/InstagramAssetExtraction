@@ -38,7 +38,10 @@ def _prep_non_speech(tmp_path: Path) -> JobContext:
         # Synthetic sine-wave MFCCs cluster MUCH tighter than real SFX.
         # Tests use 0.01 to separate 800Hz from 2000Hz beeps; production
         # default is 0.35 (see DEFAULT_CLUSTER_DIST_THRESHOLD in sfx.py).
+        # Explicitly enable SFX since the stage defaults to disabled until the
+        # algorithm is improved (see SFX_ENABLED in sfx.py).
         params={
+            "sfx_enabled": True,
             "min_cluster_size": 2,
             "clip_min_ms": 300,
             "clip_max_ms": 1500,
@@ -70,6 +73,7 @@ def test_sfx_empty_output_when_no_clusters(tmp_path: Path):
         job_id="j1", job_dir=tmp_path,
         inputs={"non_speech": tmp_path / "non_speech.wav"},
         params={
+            "sfx_enabled": True,
             "min_cluster_size": 2,
             "clip_min_ms": 300,
             "clip_max_ms": 1500,
@@ -84,3 +88,28 @@ def test_sfx_empty_output_when_no_clusters(tmp_path: Path):
     sfx_dir = tmp_path / "sfx"
     assert sfx_dir.exists()
     assert list(sfx_dir.glob("*.wav")) == []
+
+
+def test_sfx_disabled_is_noop_even_with_repeats(tmp_path: Path):
+    # Same beep-repeat fixture that would cluster when enabled. With
+    # sfx_enabled=False (the current default), the stage must NOT run
+    # clustering — just write empty sfx_clusters.json and return.
+    segments = [
+        _silence(0.5), _beep(800, 0.4),
+        _silence(1.0), _beep(800, 0.4),
+        _silence(1.0), _beep(800, 0.4),
+    ]
+    audio = np.concatenate(segments, axis=0)
+    sf.write(tmp_path / "non_speech.wav", audio, SR)
+    ctx = JobContext(
+        job_id="j1", job_dir=tmp_path,
+        inputs={"non_speech": tmp_path / "non_speech.wav"},
+        # no sfx_enabled → falls back to module default (False)
+        params={"min_cluster_size": 2},
+    )
+    result = SfxStage().run(ctx)
+
+    clusters = json.loads((tmp_path / "sfx_clusters.json").read_text())
+    assert clusters == [], "disabled SFX stage must not produce clusters"
+    assert result.extra == {"sfx_count": 0}
+    assert not list((tmp_path / "sfx").glob("*.wav"))

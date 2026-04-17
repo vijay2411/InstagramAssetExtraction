@@ -19,6 +19,17 @@ N_MFCC = 13
 # this via ctx.params["cluster_dist_threshold"].
 DEFAULT_CLUSTER_DIST_THRESHOLD = 0.35
 
+# TEMPORARY: SFX separation is disabled while we design a better algorithm.
+# The current onset + MFCC approach mistakes musical drum hits and repeated
+# riffs for SFX on music-heavy reels. Disabling keeps the pipeline intact
+# and makes music.wav = the full non-speech stem (no holes cut into it).
+#
+# To re-enable: set SFX_ENABLED = True OR pass ctx.params["sfx_enabled"] = True.
+# To redesign: start in this file — everything downstream (music stage, manifest,
+# UI) already handles the "0 SFX detected" case cleanly.
+SFX_ENABLED = False
+
+
 class SfxStage:
     name = "sfx"
 
@@ -26,6 +37,22 @@ class SfxStage:
         non_speech = ctx.inputs.get("non_speech")
         if not non_speech or not non_speech.exists():
             raise StageError("missing non_speech input", retriable=False)
+
+        # Early-exit no-op path. Writes an empty clusters file so the music
+        # stage reads it cleanly and leaves non_speech.wav untouched.
+        if not bool(ctx.params.get("sfx_enabled", SFX_ENABLED)):
+            sfx_dir = ctx.job_dir / "sfx"
+            sfx_dir.mkdir(exist_ok=True)
+            clusters_path = ctx.job_dir / "sfx_clusters.json"
+            clusters_path.write_text(json.dumps([]))
+            ctx.emit(StageEvent(
+                type="progress", stage=self.name, progress=1.0,
+                message="SFX extraction disabled (see sfx.py)",
+            ))
+            return StageResult(
+                artifacts={"clusters_meta": Path("sfx_clusters.json")},
+                extra={"sfx_count": 0},
+            )
 
         min_members = int(ctx.params.get("min_cluster_size", 2))
         clip_min_ms = int(ctx.params.get("clip_min_ms", 300))
