@@ -4,16 +4,15 @@ import { VideoPreview } from '@/components/VideoPreview';
 import { AssetCard } from '@/components/AssetCard';
 import { Waveform } from '@/components/Waveform';
 import { SfxGrid } from '@/components/SfxGrid';
+import { MusicCard } from '@/components/MusicCard';
 import { fmtDuration } from '@/lib/format';
 
 interface Props { manifest: Manifest; jobDirName: string; }
 
 export function ResultsState({ manifest, jobDirName }: Props) {
-  const { video, speech, music } = manifest.assets;
+  const { video, speech } = manifest.assets;
   const videoUrl = api.assetUrl(jobDirName, video.path);
   const speechUrl = api.assetUrl(jobDirName, speech.path);
-  const musicUrl = api.assetUrl(jobDirName, music.path);
-  const song = music.song;
   const hasSfx = manifest.assets.sfx.length > 0;
 
   // Staggered entrance; each asset slides in with a spring.
@@ -65,20 +64,7 @@ export function ResultsState({ manifest, jobDirName }: Props) {
         </motion.div>
 
         <motion.div {...item} transition={{ ...item.transition, delay: 0.25 }}>
-          <AssetCard
-            color="music"
-            label="music"
-            title={song ? song.title : 'Background music'}
-            subtitle={
-              song
-                ? [song.artist, 'identified via yt-dlp metadata'].filter(Boolean).join(' · ')
-                : `${fmtDuration(music.duration)} · demucs non-vocals`
-            }
-            downloadUrl={musicUrl}
-            downloadName="music.wav"
-          >
-            <Waveform url={musicUrl} color="#e8b13a" />
-          </AssetCard>
+          <MusicCard manifest={manifest} jobId={manifest.job_id} jobDirName={jobDirName} />
         </motion.div>
 
         {hasSfx && (

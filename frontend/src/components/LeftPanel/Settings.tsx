@@ -72,10 +72,53 @@ export function Settings() {
                   className="w-full accent-ember h-1"
                 />
               </div>
+              <AuddKeyField
+                current={config.audd_api_key || ''}
+                onSave={(v) => update({ audd_api_key: v })}
+              />
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function AuddKeyField({ current, onSave }: { current: string; onSave: (v: string) => void }) {
+  const [value, setValue] = useState(current);
+  const [focused, setFocused] = useState(false);
+  const hasKey = current.length > 0;
+
+  // Mask the stored key unless the field is focused.
+  const displayValue = focused ? value : (hasKey ? '•'.repeat(Math.min(24, current.length)) : '');
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-mute">
+          AudD API key
+        </div>
+        {hasKey && (
+          <div className="font-mono text-[9px] text-good uppercase tracking-wider">set</div>
+        )}
+      </div>
+      <input
+        type="text"
+        spellCheck={false}
+        placeholder="paste your AudD token"
+        value={displayValue}
+        onFocus={() => { setFocused(true); setValue(current); }}
+        onBlur={() => {
+          setFocused(false);
+          if (value !== current) onSave(value);
+        }}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-full bg-surface/60 border border-border-soft rounded-lg px-3 py-2 text-[11px] font-mono
+                   placeholder:text-text-mute/60 focus:border-ember focus:ring-2 focus:ring-ember/10 outline-none transition"
+      />
+      <div className="mt-1.5 font-mono text-[9px] text-text-mute/70 leading-relaxed">
+        needed to identify songs on 'original audio' reels. free tier at dashboard.audd.io
+      </div>
     </div>
   );
 }

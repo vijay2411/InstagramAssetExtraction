@@ -13,6 +13,9 @@ class Config:
     sfx_min_cluster_size: int = 2
     sfx_clip_min_ms: int = 300
     sfx_clip_max_ms: int = 1500
+    # AudD API token for case-1 music fingerprinting. Empty = feature disabled
+    # and UI will surface a "set key in Settings" hint.
+    audd_api_key: str = ""
 
 DEFAULT_CONFIG = Config()
 

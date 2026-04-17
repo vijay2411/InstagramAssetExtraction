@@ -55,11 +55,18 @@ class MusicStage:
         title = meta.get("track") or meta.get("song_title")
         artist = meta.get("artist") or meta.get("creator")
         if title:
+            from app.music_id.links import all_search_links
+            links = all_search_links(title, artist)
             song = {
                 "title": title,
                 "artist": artist,
                 "album": meta.get("album"),
                 "source": "yt_dlp_meta",
+                # For case 2 we don't have direct URLs — surface search URLs so
+                # the user can click through to Spotify / Apple / YouTube.
+                "spotify_url": links["spotify"],
+                "apple_music_url": links["apple_music"],
+                "youtube_url": links["youtube"],
             }
 
         ctx.emit(StageEvent(type="progress", stage=self.name, progress=1.0))
