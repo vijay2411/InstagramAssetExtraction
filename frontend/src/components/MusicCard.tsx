@@ -28,8 +28,11 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
   // Auto-cut if windowStart is null.
   const maxStart = Math.max(0, Math.floor(music.duration - windowLen));
 
-  const isCase1FromAudD = song && song.source !== 'yt_dlp_meta';
-  const isCase2 = song && song.source === 'yt_dlp_meta';
+  // Case 2 = Instagram has already tagged a known song on the reel (either
+  // via yt-dlp's own metadata or via our embed-page fallback scrape).
+  const isCase2 = !!song && (song.source === 'yt_dlp_meta' || song.source === 'ig_embed');
+  // Case 1 = user fingerprinted via AudD. AudD results have no `source` set.
+  const isCase1FromAudD = !!song && !isCase2;
   const noSong = !song;
 
   async function runIdentify() {

@@ -54,6 +54,26 @@ class MusicStage:
         song = None
         title = meta.get("track") or meta.get("song_title")
         artist = meta.get("artist") or meta.get("creator")
+        meta_source = "yt_dlp_meta"
+
+        # Fallback: yt-dlp's Instagram extractor doesn't populate track/artist
+        # even when IG's reel page shows a library track (e.g. "Boney M. ·
+        # Rasputin (Instrumental)"). The same info IS available on IG's
+        # anonymous embed endpoint. Scrape it as a second chance.
+        if not title:
+            try:
+                from app.music_id.ig_attribution import fetch_ig_music_attribution
+                url = meta.get("webpage_url") or meta.get("original_url") or ""
+                if url and "instagram.com" in url:
+                    ig = fetch_ig_music_attribution(url)
+                    if ig:
+                        title = ig.title
+                        artist = ig.artist
+                        meta_source = "ig_embed"
+            except Exception:
+                # Don't fail the stage if scraping misbehaves — silently skip.
+                pass
+
         if title:
             from app.music_id.links import all_search_links
             links = all_search_links(title, artist)
@@ -61,7 +81,7 @@ class MusicStage:
                 "title": title,
                 "artist": artist,
                 "album": meta.get("album"),
-                "source": "yt_dlp_meta",
+                "source": meta_source,
                 # For case 2 we don't have direct URLs — surface search URLs so
                 # the user can click through to Spotify / Apple / YouTube.
                 "spotify_url": links["spotify"],
