@@ -42,6 +42,16 @@ export interface IdentifyMusicResponse {
   song?: Song;
 }
 
+export interface ExtractSfxResponse {
+  ok: boolean;
+  stage_failed?: string | null;
+  error?: string | null;
+  sfx_count: number;
+  cache_hit: boolean;
+  alignment?: { offset_s: number; pitch_shift: number; confidence: number } | null;
+  residual_rms_ratio?: number | null;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
@@ -69,6 +79,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  extractSfx: (
+    job_id: string,
+    body: { title?: string; artist?: string } = {},
+  ) =>
+    req<ExtractSfxResponse>(`/api/jobs/${job_id}/extract-sfx`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getManifest: (job_dir_name: string) =>
+    req<Manifest>(`/api/assets/${encodeURIComponent(job_dir_name)}/metadata.json`),
   assetUrl: (job_dir_name: string, relpath: string) =>
     `/api/assets/${encodeURIComponent(job_dir_name)}/${relpath.split('/').map(encodeURIComponent).join('/')}`,
 };

@@ -15,6 +15,23 @@ from app.jobs.runner import JobRunner
 from app.music_id.audd import identify as audd_identify, AudDError
 from app.music_id.window import pick_best_window, cut_window
 from app.music_id.links import youtube_search_url
+from app.sfx_extract.orchestrator import extract_sfx
+from app.sfx_extract.song_cache import LocalFileSongCache
+from functools import lru_cache as _lru_cache
+
+
+@_lru_cache(maxsize=1)
+def _song_cache() -> LocalFileSongCache:
+    base = Path("~/.extract-assets/song_cache").expanduser()
+    return LocalFileSongCache(base)
+
+
+class ExtractSfxRequest(BaseModel):
+    # Optional: override the identified song. Primarily for "retry with
+    # different spelling" — normally the endpoint reads song from the
+    # existing manifest.
+    title: str | None = None
+    artist: str | None = None
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -142,3 +159,97 @@ def identify_music(
         (job_dir / "music_match.json").write_text(json.dumps(response, indent=2))
 
     return response
+
+
+def _song_from_job(job_dir: Path, override_title: str | None, override_artist: str | None) -> tuple[str, str] | None:
+    """Resolve (artist, title) for the job. Priority:
+    1. Explicit override from request body.
+    2. music_match.json (AudD match — case 1).
+    3. metadata.json assets.music.song (yt-dlp / IG embed — case 2).
+    Returns None if no song info is available.
+    """
+    if override_title and override_artist:
+        return override_artist, override_title
+    match_p = job_dir / "music_match.json"
+    if match_p.exists():
+        try:
+            d = json.loads(match_p.read_text()).get("song") or {}
+            if d.get("title") and d.get("artist"):
+                return d["artist"], d["title"]
+        except Exception:
+            pass
+    manifest_p = job_dir / "metadata.json"
+    if manifest_p.exists():
+        try:
+            m = json.loads(manifest_p.read_text())
+            s = (m.get("assets", {}).get("music", {}) or {}).get("song") or {}
+            if s.get("title") and s.get("artist"):
+                return s["artist"], s["title"]
+        except Exception:
+            pass
+    return None
+
+
+@router.post("/{job_id}/extract-sfx")
+async def extract_sfx_endpoint(
+    job_id: str,
+    req: ExtractSfxRequest,
+    jobs: InMemoryJobStore = Depends(get_job_store),
+    bus: EventBus = Depends(get_event_bus),
+    config: FileConfigStore = Depends(get_config_store),
+):
+    """
+    Run the download → align → subtract → mine pipeline for a job that has
+    music.wav + a confirmed song. Streams progress events over the existing
+    per-job WebSocket bus so the UI can animate.
+
+    Long-running (~30-60s first time, <10s on cache hit). Runs in a thread
+    so the HTTP response isn't blocked — final result is awaited.
+    """
+    state = jobs.get(job_id)
+    if state is None:
+        raise HTTPException(404, "job not found")
+    job_dir = Path(state.job_dir)
+    if not (job_dir / "music.wav").exists():
+        raise HTTPException(409, "music.wav not available — run the pipeline first")
+
+    song = _song_from_job(job_dir, req.title, req.artist)
+    if song is None:
+        raise HTTPException(
+            400,
+            "no song identified — run music identification (Find Song) before extracting SFX",
+        )
+    artist, title = song
+
+    loop = asyncio.get_running_loop()
+
+    def emit(event: dict) -> None:
+        asyncio.run_coroutine_threadsafe(bus.publish(job_id, event), loop)
+
+    # Run the extraction in a worker thread — it's CPU/IO heavy.
+    result = await asyncio.to_thread(
+        extract_sfx,
+        job_dir=job_dir,
+        artist=artist,
+        title=title,
+        cache=_song_cache(),
+        emit=emit,
+    )
+
+    # Always emit a terminal event so the UI knows we're done.
+    emit({"type": "sfx_extract.done", "ok": result.ok, "stage_failed": result.stage_failed,
+          "error": result.error, "sfx_count": result.sfx_count, "cache_hit": result.cache_hit})
+
+    return {
+        "ok": result.ok,
+        "stage_failed": result.stage_failed,
+        "error": result.error,
+        "sfx_count": result.sfx_count,
+        "cache_hit": result.cache_hit,
+        "alignment": {
+            "offset_s": result.alignment.offset_s,
+            "pitch_shift": result.alignment.pitch_shift,
+            "confidence": result.alignment.confidence,
+        } if result.alignment else None,
+        "residual_rms_ratio": result.residual_rms_ratio,
+    }

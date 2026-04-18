@@ -13,6 +13,18 @@ export interface StageState {
   artifacts?: Record<string, string>;
 }
 
+export type SfxExtractStatus = 'idle' | 'running' | 'done' | 'error';
+export interface SfxExtractState {
+  status: SfxExtractStatus;
+  stage: string | null;        // 'cache' | 'download' | 'align' | 'subtract' | 'mine' | null
+  progress: number;            // 0..1 within the current stage
+  message: string | null;      // latest progress message
+  error: string | null;        // failure reason
+  stageFailed: string | null;  // which sub-stage bailed
+  sfxCount: number | null;     // populated on done
+  cacheHit: boolean | null;
+}
+
 interface JobSliceState {
   jobId: string | null;
   jobDirName: string | null;
@@ -20,13 +32,27 @@ interface JobSliceState {
   stages: Record<StageName, StageState>;
   manifest: Manifest | null;
   error: { stage: StageName; message: string } | null;
+  sfxExtract: SfxExtractState;
 }
 
 interface JobStore extends JobSliceState {
   startJob: (jobId: string, jobDirName: string) => void;
   applyEvent: (e: any) => void;
   reset: () => void;
+  startSfxExtract: () => void;
+  setManifest: (m: Manifest) => void;
 }
+
+const initialSfxExtract = (): SfxExtractState => ({
+  status: 'idle',
+  stage: null,
+  progress: 0,
+  message: null,
+  error: null,
+  stageFailed: null,
+  sfxCount: null,
+  cacheHit: null,
+});
 
 const initialStages = (): Record<StageName, StageState> => ({
   download: { status: 'pending', progress: 0 },
@@ -40,9 +66,10 @@ const initialStages = (): Record<StageName, StageState> => ({
 export const useJobStore = create<JobStore>((set, get) => ({
   jobId: null, jobDirName: null, status: 'idle',
   stages: initialStages(), manifest: null, error: null,
+  sfxExtract: initialSfxExtract(),
 
   startJob: (jobId, jobDirName) =>
-    set({ jobId, jobDirName, status: 'running', stages: initialStages(), manifest: null, error: null }),
+    set({ jobId, jobDirName, status: 'running', stages: initialStages(), manifest: null, error: null, sfxExtract: initialSfxExtract() }),
 
   applyEvent: (e) => {
     const s = get().stages;
@@ -80,8 +107,36 @@ export const useJobStore = create<JobStore>((set, get) => ({
       case 'job.canceled':
         set({ status: 'canceled' });
         break;
+      case 'sfx_extract.progress':
+        set({ sfxExtract: {
+          ...get().sfxExtract,
+          status: 'running',
+          stage: e.stage,
+          progress: e.progress ?? 0,
+          message: e.message ?? null,
+        }});
+        break;
+      case 'sfx_extract.done':
+        set({ sfxExtract: {
+          ...get().sfxExtract,
+          status: e.ok ? 'done' : 'error',
+          progress: 1,
+          error: e.error ?? null,
+          stageFailed: e.stage_failed ?? null,
+          sfxCount: e.sfx_count ?? 0,
+          cacheHit: e.cache_hit ?? null,
+        }});
+        break;
     }
   },
 
-  reset: () => set({ jobId: null, jobDirName: null, status: 'idle', stages: initialStages(), manifest: null, error: null }),
+  startSfxExtract: () => set({ sfxExtract: { ...initialSfxExtract(), status: 'running' } }),
+
+  setManifest: (m) => set({ manifest: m }),
+
+  reset: () => set({
+    jobId: null, jobDirName: null, status: 'idle',
+    stages: initialStages(), manifest: null, error: null,
+    sfxExtract: initialSfxExtract(),
+  }),
 }));

@@ -6,7 +6,11 @@ export type WsEvent =
   | { type: 'stage.error'; stage: string; message: string; retriable: boolean }
   | { type: 'job.done'; manifest: any }
   | { type: 'job.error'; stage: string; message: string }
-  | { type: 'job.canceled' };
+  | { type: 'job.canceled' }
+  // SFX extraction progress — piggybacks on the same WS bus so MusicCard
+  // can listen without opening a second socket.
+  | { type: 'sfx_extract.progress'; stage: string; progress?: number; message?: string }
+  | { type: 'sfx_extract.done'; ok: boolean; sfx_count: number; error?: string | null; stage_failed?: string | null; cache_hit?: boolean };
 
 export function openJobSocket(jobId: string, onEvent: (e: WsEvent) => void): WebSocket {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';

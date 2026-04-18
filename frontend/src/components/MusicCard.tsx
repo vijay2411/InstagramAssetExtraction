@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { api, type Manifest, type Song, type IdentifyMusicResponse } from '@/lib/api';
 import { Waveform } from './Waveform';
 import { fmtDuration } from '@/lib/format';
+import { useJobStore } from '@/hooks/useJobStore';
 
 interface Props {
   manifest: Manifest;
@@ -38,6 +39,33 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
   // Case 1 = user fingerprinted via AudD. AudD results have no `source` set.
   const isCase1FromAudD = !!song && !isCase2;
   const noSong = !song;
+
+  // SFX extraction state lives in the store since the progress events
+  // arrive over the already-open per-job WebSocket.
+  const sfxExtract = useJobStore((s) => s.sfxExtract);
+  const startSfxExtract = useJobStore((s) => s.startSfxExtract);
+  const setManifest = useJobStore((s) => s.setManifest);
+  const sfxRunning = sfxExtract.status === 'running';
+
+  async function runExtractSfx() {
+    startSfxExtract();
+    try {
+      const resp = await api.extractSfx(jobId);
+      if (resp.ok) {
+        // Refresh manifest so the SfxGrid below this card picks up new clips.
+        try {
+          const fresh = await api.getManifest(jobDirName);
+          setManifest(fresh);
+        } catch {
+          /* non-fatal — the sfx_extract.done event still marked us done */
+        }
+      }
+    } catch (e: any) {
+      // Network/404 errors surface via the store error too; but catch here
+      // so we don't uncaught-promise them.
+      console.error('extract-sfx failed', e);
+    }
+  }
 
   async function runIdentify() {
     setBusy(true);
@@ -124,6 +152,22 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
           <Waveform url={musicUrl} color={MUSIC_HEX} gain={gain} />
           <GainSlider gain={gain} onChange={setGain} />
         </div>
+
+        {/* SFX extraction — only available once a song is confirmed */}
+        {song && (
+          <SfxExtractPanel
+            sfxExtract={sfxExtract}
+            sfxRunning={sfxRunning}
+            existingSfxCount={manifest.assets.sfx.length}
+            onRun={runExtractSfx}
+          />
+        )}
+        {!song && (
+          <div className="rounded-xl border border-border/60 bg-surface-3/40 p-3 text-[11px] text-text-mute font-mono leading-relaxed">
+            Identify the song first — then you can extract the sfx layer by
+            subtracting the reference track from the music stem.
+          </div>
+        )}
 
         {/* Streaming links — shown when we have a song, any source */}
         {song && (
@@ -324,6 +368,78 @@ function GainSlider({ gain, onChange }: { gain: number; onChange: (v: number) =>
                         ${clipping ? 'text-coral' : gain === 1.0 ? 'text-text-mute' : 'text-ember'}`}>
         {gain.toFixed(2)}×
       </span>
+    </div>
+  );
+}
+
+type SfxExtractState = ReturnType<typeof useJobStore.getState>['sfxExtract'];
+
+const SFX_STAGE_LABELS: Record<string, string> = {
+  cache: 'checking cache',
+  download: 'downloading from YouTube',
+  align: 'aligning to reel music',
+  subtract: 'subtracting reference',
+  mine: 'mining repeated sfx',
+};
+
+function SfxExtractPanel({
+  sfxExtract,
+  sfxRunning,
+  existingSfxCount,
+  onRun,
+}: {
+  sfxExtract: SfxExtractState;
+  sfxRunning: boolean;
+  existingSfxCount: number;
+  onRun: () => void;
+}) {
+  const failed = sfxExtract.status === 'error';
+  const done = sfxExtract.status === 'done';
+  const idle = sfxExtract.status === 'idle';
+  const stageLabel = sfxExtract.stage ? SFX_STAGE_LABELS[sfxExtract.stage] ?? sfxExtract.stage : null;
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-surface-3/40 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-sfx mb-1">
+            sfx extraction
+          </div>
+          <div className="text-[12.5px] text-text-dim leading-snug">
+            {idle && existingSfxCount === 0 && "Subtract the reference song from the music stem to isolate sfx."}
+            {idle && existingSfxCount > 0 && `${existingSfxCount} sfx extracted. Re-run to try again.`}
+            {sfxRunning && (stageLabel ?? 'starting…')}
+            {done && `Done — ${sfxExtract.sfxCount ?? 0} sfx found${sfxExtract.cacheHit ? ' (cache hit)' : ''}.`}
+            {failed && <span className="text-coral">{sfxExtract.error || 'extraction failed'}</span>}
+          </div>
+        </div>
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={onRun}
+          disabled={sfxRunning}
+          className="shrink-0 rounded-lg bg-sfx/15 border border-sfx/50 hover:bg-sfx/25
+                     px-3 py-2 text-[11px] font-mono uppercase tracking-wider text-sfx
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {sfxRunning ? 'extracting…' : idle ? 'extract sfx' : 'run again'}
+        </motion.button>
+      </div>
+
+      {sfxRunning && (
+        <div className="space-y-1.5">
+          <div className="h-1 bg-surface rounded overflow-hidden">
+            <motion.div
+              className="h-full bg-sfx"
+              animate={{ width: `${Math.round((sfxExtract.progress ?? 0) * 100)}%` }}
+              transition={{ duration: 0.25 }}
+            />
+          </div>
+          {sfxExtract.message && (
+            <div className="font-mono text-[10px] text-text-mute truncate">{sfxExtract.message}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
