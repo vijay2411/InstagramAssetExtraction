@@ -24,7 +24,7 @@ from typing import Callable
 
 from app.sfx_extract.song_cache import SongCache, LocalFileSongCache
 from app.sfx_extract.yt_download import fetch_top_candidates, YtDownloadError
-from app.sfx_extract.align import align_best_of_candidates, MIN_CONFIDENCE, AlignmentResult
+from app.sfx_extract.align import align, MIN_CONFIDENCE, AlignmentResult
 from app.sfx_extract.subtract import subtract, FAILURE_THRESHOLD
 from app.pipeline.sfx import SfxStage
 from app.pipeline.base import JobContext, StageEvent
@@ -90,24 +90,43 @@ def extract_sfx(
             return ExtractResult(ok=False, stage_failed="download", error=str(e))
         _emit(emit, "download", 0.7, f"got {len(candidates)} candidates — picking best")
 
-        # --- 3. Align (picks best candidate from the top-3) ---
-        _emit(emit, "align", 0.0, "cross-correlating against reel music")
-        candidate_paths = [c.audio_path for c in candidates]
-        try:
-            best_i, alignment = align_best_of_candidates(music_path, candidate_paths)
-        except Exception as e:
-            return ExtractResult(ok=False, stage_failed="align", error=str(e))
+        # --- 3. Align + subtract each candidate; pick by residual quality ---
+        # Alignment z-score alone is a poor predictor of whether subtraction
+        # will actually work — two recordings of the same song (e.g. remaster
+        # vs original instrumental) can score similarly on onset cross-corr
+        # but differ massively in spectral-subtraction residual. Always
+        # subtract every candidate and pick the cleanest residual.
+        _emit(emit, "align", 0.0, f"aligning {len(candidates)} candidates")
+        tried: list[tuple[AlignmentResult, "SubtractionResult", int]] = []
+        for i, cand in enumerate(candidates):
+            try:
+                a = align(music_path, cand.audio_path)
+            except Exception:
+                continue
+            if a.confidence < MIN_CONFIDENCE:
+                continue
+            # Quick subtraction probe per candidate (~1s on a 60s clip).
+            probe_dst = job_dir / f"_probe_residual_{i}.wav"
+            try:
+                sub = subtract(music_path, cand.audio_path, ref_offset_s=a.offset_s, dst_path=probe_dst)
+            except Exception:
+                continue
+            tried.append((a, sub, i))
+            _emit(emit, "align", 0.5 + 0.5 * ((i + 1) / len(candidates)),
+                  f"cand {i+1}/{len(candidates)}: offset {a.offset_s:.0f}s, residual {sub.residual_rms_ratio:.2f}")
 
-        if alignment.confidence < MIN_CONFIDENCE:
+        if not tried:
             return ExtractResult(
                 ok=False, stage_failed="align",
-                error=f"no candidate aligned reliably (best z-score={alignment.confidence:.1f}, threshold={MIN_CONFIDENCE})",
-                alignment=alignment,
+                error=f"no candidate aligned above z={MIN_CONFIDENCE} (all {len(candidates)} tried)",
             )
 
+        # Pick lowest residual ratio — that directly measures subtraction quality.
+        tried.sort(key=lambda t: t[1].residual_rms_ratio)
+        alignment, sub_probe, best_i = tried[0]
         best_candidate = candidates[best_i]
         _emit(emit, "align", 1.0,
-              f"matched {best_candidate.title[:40]} (z={alignment.confidence:.1f}, pitch {alignment.pitch_shift:+d})")
+              f"best: {best_candidate.title[:40]} (residual={sub_probe.residual_rms_ratio:.2f}, z={alignment.confidence:.1f})")
 
         # Populate cache for next time.
         cache.put(
@@ -120,11 +139,11 @@ def extract_sfx(
         )
         reference_path = best_candidate.audio_path
 
-    # --- 4. If cache hit, align once; otherwise we already aligned above. ---
+    # --- 4. Cache-hit path: align + subtract the one cached reference ---
     if cache_hit:
         _emit(emit, "align", 0.0, "aligning against cached reference")
         try:
-            _, alignment = align_best_of_candidates(music_path, [reference_path])
+            alignment = align(music_path, reference_path)
         except Exception as e:
             return ExtractResult(ok=False, stage_failed="align", error=str(e))
         if alignment.confidence < MIN_CONFIDENCE:
@@ -134,20 +153,33 @@ def extract_sfx(
                 alignment=alignment,
             )
         _emit(emit, "align", 1.0, f"aligned (z={alignment.confidence:.1f}, pitch {alignment.pitch_shift:+d})")
+        sub_probe = None  # produce residual fresh below
 
-    # --- 5. Spectral subtraction ---
-    _emit(emit, "subtract", 0.0, "subtracting reference from mix")
+    # --- 5. Write the final residual.wav ---
+    # If we already have a probe subtraction from the candidate-picking
+    # loop, move it into place. Otherwise (cache hit) do the subtraction now.
     residual_path = job_dir / "sfx_residual.wav"
-    sub_result = subtract(
-        mix_path=music_path,
-        ref_path=reference_path,
-        ref_offset_s=alignment.offset_s,
-        dst_path=residual_path,
-    )
+    if not cache_hit and sub_probe is not None:
+        _emit(emit, "subtract", 0.0, "writing residual")
+        if sub_probe.residual_path != residual_path:
+            shutil.move(str(sub_probe.residual_path), str(residual_path))
+        # Clean up the other probe files.
+        for p in job_dir.glob("_probe_residual_*.wav"):
+            p.unlink(missing_ok=True)
+        sub_result = sub_probe
+    else:
+        _emit(emit, "subtract", 0.0, "subtracting reference from mix")
+        sub_result = subtract(
+            mix_path=music_path,
+            ref_path=reference_path,
+            ref_offset_s=alignment.offset_s,
+            dst_path=residual_path,
+        )
+
     if not sub_result.ok:
         return ExtractResult(
             ok=False, stage_failed="subtract",
-            error=f"residual too loud (ratio={sub_result.residual_rms_ratio:.2f}) — alignment may be off",
+            error=f"residual too loud (ratio={sub_result.residual_rms_ratio:.2f}) — alignment may be off or wrong song",
             alignment=alignment,
             residual_rms_ratio=sub_result.residual_rms_ratio,
         )

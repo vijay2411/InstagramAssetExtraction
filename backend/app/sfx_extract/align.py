@@ -38,12 +38,19 @@ DEFAULT_N_MELS = 128
 DEFAULT_PITCH_RANGE = tuple(range(-3, 6))  # -3..+5 inclusive = 9 shifts
 
 # Z-score threshold above which an alignment is considered reliable.
-# Empirical calibration:
-#   - matched slice of a percussive reference: z ≈ 13-40
-#   - unrelated white noise against a reference: z ≈ 4-7 (max-of-N variance)
-#   - unrelated music against a reference: z ≈ 3-8
-# 8.0 separates the two regimes with clear margin.
-MIN_CONFIDENCE = 8.0
+#
+# Calibration:
+#   - synthetic matched slice with percussive onsets: z ≈ 13-40
+#   - synthetic unrelated content: z ≈ 4-7 (max-of-N variance)
+#   - REAL Demucs-extracted reel-music vs correct YouTube studio recording: z ≈ 3-5
+#     (Demucs artifacts + EQ differences + slightly different tempo/drums
+#      between original recording and whatever IG re-encoded)
+#
+# 2.5 is permissive — basically "not random noise". The REAL quality gate
+# is the residual RMS ratio from the subtraction stage downstream
+# (subtract.FAILURE_THRESHOLD=0.6), which directly measures whether the
+# chosen reference actually explains the mix.
+MIN_CONFIDENCE = 2.5
 
 
 @dataclass

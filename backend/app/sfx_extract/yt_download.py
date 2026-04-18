@@ -57,13 +57,19 @@ def search_candidates(artist: str, title: str, top_n: int = 3) -> list[dict]:
         [
             "--no-playlist",
             "--no-warnings",
+            # Unavailable / deleted / region-blocked videos in search results
+            # would otherwise abort the whole search; skip them and keep going.
+            "--ignore-errors",
             "--skip-download",
             "--print-json",
             query,
         ],
         timeout_s=60,
     )
-    if proc.returncode != 0:
+    # With --ignore-errors, yt-dlp can return non-zero while still printing
+    # usable JSON for the candidates that worked. Accept the run as long as
+    # we got at least one line on stdout.
+    if not proc.stdout.strip():
         raise YtDownloadError(
             f"ytsearch failed for {artist!r} / {title!r}: {proc.stderr.strip()[:300]}"
         )

@@ -41,7 +41,7 @@ def test_extract_sfx_returns_precheck_error_when_no_music(tmp_path: Path):
 
 
 @patch("app.sfx_extract.orchestrator.subtract")
-@patch("app.sfx_extract.orchestrator.align_best_of_candidates")
+@patch("app.sfx_extract.orchestrator.align")
 @patch("app.sfx_extract.orchestrator.fetch_top_candidates")
 @patch("app.sfx_extract.orchestrator.SfxStage")
 def test_extract_sfx_happy_path_no_cache(
@@ -58,17 +58,16 @@ def test_extract_sfx_happy_path_no_cache(
                     duration_s=244.0, audio_path=cand_audio)
     ]
     # Align picks it with high confidence.
-    mock_align.return_value = (0, AlignmentResult(
+    mock_align.return_value = AlignmentResult(
         offset_s=5.0, pitch_shift=0, confidence=20.0,
         reference_duration_s=30.0, hop_s=0.023,
-    ))
-    # Subtraction succeeds.
-    sub_out = MagicMock()
-    sub_out.ok = True
-    sub_out.residual_rms_ratio = 0.1
-    sub_out.residual_path = tmp_path / "sfx_residual.wav"
-    _make_music_wav(sub_out.residual_path, dur_s=10.0)
-    mock_sub.return_value = sub_out
+    )
+    # Subtraction succeeds. Probe files land at _probe_residual_<i>.wav;
+    # orchestrator moves the winning probe into sfx_residual.wav.
+    def fake_subtract(mix_path, ref_path, ref_offset_s, dst_path):
+        sf.write(str(dst_path), np.zeros((SR, 2), dtype=np.float32), SR)
+        return MagicMock(ok=True, residual_rms_ratio=0.1, residual_path=dst_path)
+    mock_sub.side_effect = fake_subtract
     # SfxStage instance returns a result with 3 sfx clusters.
     stage_instance = MagicMock()
     stage_instance.run.return_value = MagicMock(
@@ -105,16 +104,16 @@ def test_extract_sfx_bails_on_download_failure(mock_fetch, tmp_path: Path):
     assert "blocked" in (result.error or "")
 
 
-@patch("app.sfx_extract.orchestrator.align_best_of_candidates")
+@patch("app.sfx_extract.orchestrator.align")
 @patch("app.sfx_extract.orchestrator.fetch_top_candidates")
 def test_extract_sfx_bails_on_low_alignment_confidence(mock_fetch, mock_align, tmp_path: Path):
     _make_music_wav(tmp_path / "music.wav")
     cand = tmp_path / "c.wav"; _make_music_wav(cand, dur_s=30.0)
     mock_fetch.return_value = [YtCandidate(1, "x", "T", "u", 200.0, cand)]
-    mock_align.return_value = (0, AlignmentResult(
-        offset_s=5.0, pitch_shift=0, confidence=3.0,  # below MIN_CONFIDENCE 8.0
+    mock_align.return_value = AlignmentResult(
+        offset_s=5.0, pitch_shift=0, confidence=1.0,  # below MIN_CONFIDENCE 2.5
         reference_duration_s=30.0, hop_s=0.023,
-    ))
+    )
     cache = LocalFileSongCache(tmp_path / "cache")
     result = extract_sfx(tmp_path, "A", "B", cache=cache)
     assert not result.ok
@@ -122,20 +121,20 @@ def test_extract_sfx_bails_on_low_alignment_confidence(mock_fetch, mock_align, t
 
 
 @patch("app.sfx_extract.orchestrator.subtract")
-@patch("app.sfx_extract.orchestrator.align_best_of_candidates")
+@patch("app.sfx_extract.orchestrator.align")
 @patch("app.sfx_extract.orchestrator.fetch_top_candidates")
 def test_extract_sfx_bails_on_bad_subtraction(mock_fetch, mock_align, mock_sub, tmp_path: Path):
     _make_music_wav(tmp_path / "music.wav")
     cand = tmp_path / "c.wav"; _make_music_wav(cand, dur_s=30.0)
     mock_fetch.return_value = [YtCandidate(1, "x", "T", "u", 200.0, cand)]
-    mock_align.return_value = (0, AlignmentResult(
+    mock_align.return_value = AlignmentResult(
         offset_s=0, pitch_shift=0, confidence=15.0,
         reference_duration_s=30.0, hop_s=0.023,
-    ))
-    bad_sub = MagicMock()
-    bad_sub.ok = False
-    bad_sub.residual_rms_ratio = 0.8
-    mock_sub.return_value = bad_sub
+    )
+    def bad_sub(mix_path, ref_path, ref_offset_s, dst_path):
+        sf.write(str(dst_path), np.zeros((SR, 2), dtype=np.float32), SR)
+        return MagicMock(ok=False, residual_rms_ratio=0.8, residual_path=dst_path)
+    mock_sub.side_effect = bad_sub
 
     cache = LocalFileSongCache(tmp_path / "cache")
     result = extract_sfx(tmp_path, "A", "B", cache=cache)
@@ -144,7 +143,7 @@ def test_extract_sfx_bails_on_bad_subtraction(mock_fetch, mock_align, mock_sub, 
 
 
 @patch("app.sfx_extract.orchestrator.subtract")
-@patch("app.sfx_extract.orchestrator.align_best_of_candidates")
+@patch("app.sfx_extract.orchestrator.align")
 @patch("app.sfx_extract.orchestrator.SfxStage")
 def test_extract_sfx_uses_cache_when_available(
     mock_sfx_stage_cls, mock_align, mock_sub, tmp_path: Path,
@@ -155,14 +154,14 @@ def test_extract_sfx_uses_cache_when_available(
     src = tmp_path / "cached.wav"; _make_music_wav(src, dur_s=30.0)
     cache.put("A", "B", src, source="youtube", duration_s=30.0)
 
-    mock_align.return_value = (0, AlignmentResult(
+    mock_align.return_value = AlignmentResult(
         offset_s=3.0, pitch_shift=0, confidence=12.0,
         reference_duration_s=30.0, hop_s=0.023,
-    ))
-    sub_out = MagicMock(); sub_out.ok = True; sub_out.residual_rms_ratio = 0.1
-    sub_out.residual_path = tmp_path / "sfx_residual.wav"
-    _make_music_wav(sub_out.residual_path)
-    mock_sub.return_value = sub_out
+    )
+    def good_sub(mix_path, ref_path, ref_offset_s, dst_path):
+        sf.write(str(dst_path), np.zeros((SR, 2), dtype=np.float32), SR)
+        return MagicMock(ok=True, residual_rms_ratio=0.1, residual_path=dst_path)
+    mock_sub.side_effect = good_sub
 
     stage_instance = MagicMock()
     stage_instance.run.return_value = MagicMock(
