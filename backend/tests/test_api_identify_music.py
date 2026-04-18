@@ -98,7 +98,7 @@ def test_identify_manual_window(mock_identify, tmp_path: Path):
     assert resp.status_code == 200
     body = resp.json()
     assert body["matched"] is False
-    assert body["window"] == {"start_s": 5.0, "end_s": 15.0, "auto": False}
+    assert body["window"] == {"start_s": 5.0, "end_s": 15.0, "auto": False, "gain": 1.0}
     _teardown()
 
 
@@ -110,6 +110,31 @@ def test_identify_persists_match(mock_identify, tmp_path: Path):
     resp = client.post("/api/jobs/abc123/identify-music", json={})
     assert resp.status_code == 200
     assert (job_dir / "music_match.json").exists()
+    _teardown()
+
+
+@patch("app.api.jobs.audd_identify")
+def test_identify_forwards_gain_param(mock_identify, tmp_path: Path):
+    """When gain > 1 is passed, the clip written to disk (and sent to AudD)
+    should be amplified. We verify via the file handed to audd_identify."""
+    _setup(tmp_path)
+    captured = {}
+
+    def fake(clip_path, api_key):
+        # Read the clip back to confirm it's been amplified.
+        import soundfile as sf2
+        data, _ = sf2.read(str(clip_path))
+        captured["peak"] = float(data.max())
+        return None
+    mock_identify.side_effect = fake
+
+    client = TestClient(app)
+    # Music.wav in the fixture is random * 0.3 → peak around 0.3.
+    # 2x gain → ~0.6 peak.
+    resp = client.post("/api/jobs/abc123/identify-music", json={"gain": 2.0})
+    assert resp.status_code == 200
+    assert resp.json()["window"]["gain"] == 2.0
+    assert captured["peak"] > 0.5, f"expected amplified peak > 0.5, got {captured['peak']}"
     _teardown()
 
 

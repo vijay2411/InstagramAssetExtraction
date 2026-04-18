@@ -24,6 +24,7 @@ class CreateJobRequest(BaseModel):
 class IdentifyMusicRequest(BaseModel):
     start_s: float | None = None  # auto-pick if omitted
     window_s: float = 20.0
+    gain: float = 1.0              # multiplier applied to the clip before fingerprint
 
 def _run_pipeline_async(
     job_id: str, url: str, job_dir: Path,
@@ -108,8 +109,9 @@ def identify_music(
         end_s = start_s + float(req.window_s)
         auto = False
 
-    clip_path = job_dir / f"_music_clip_{int(start_s)}_{int(end_s)}.wav"
-    cut_window(music_path, clip_path, start_s, end_s)
+    gain = max(0.0, min(8.0, float(req.gain or 1.0)))  # clamp to sane range
+    clip_path = job_dir / f"_music_clip_{int(start_s)}_{int(end_s)}_g{gain:.2f}.wav"
+    cut_window(music_path, clip_path, start_s, end_s, gain=gain)
 
     try:
         match = audd_identify(clip_path, api_key=cfg.audd_api_key)
@@ -124,7 +126,12 @@ def identify_music(
 
     response: dict = {
         "matched": match is not None,
-        "window": {"start_s": round(start_s, 2), "end_s": round(end_s, 2), "auto": auto},
+        "window": {
+            "start_s": round(start_s, 2),
+            "end_s": round(end_s, 2),
+            "auto": auto,
+            "gain": round(gain, 2),
+        },
     }
     if match is not None:
         match_dict = asdict(match)

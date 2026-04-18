@@ -53,6 +53,26 @@ def test_cut_window_writes_correct_duration(tmp_path: Path):
     assert abs(info.duration - 5.0) < 0.01
 
 
+def test_cut_window_applies_gain(tmp_path: Path):
+    # Quiet input @ 0.1 amplitude, 2x gain → peaks ~0.2, no clipping.
+    src = tmp_path / "q.wav"
+    dst = tmp_path / "q_amp.wav"
+    sf.write(str(src), np.ones((SR * 2, 2), dtype=np.float32) * 0.1, SR)
+    cut_window(src, dst, 0.0, 2.0, gain=2.0)
+    data, _ = sf.read(str(dst))
+    assert abs(data.max() - 0.2) < 0.01
+
+
+def test_cut_window_clips_on_overgain(tmp_path: Path):
+    # Loud input @ 0.8, 3x gain → would be 2.4 → clipped to 1.0.
+    src = tmp_path / "l.wav"
+    dst = tmp_path / "l_amp.wav"
+    sf.write(str(src), np.ones((SR, 2), dtype=np.float32) * 0.8, SR)
+    cut_window(src, dst, 0.0, 1.0, gain=3.0)
+    data, _ = sf.read(str(dst))
+    assert data.max() <= 1.0 and data.max() >= 0.99
+
+
 def test_search_urls_escape_query():
     assert spotify_search_url("Bad Guy", "Billie Eilish") == \
         "https://open.spotify.com/search/Bad+Guy+Billie+Eilish"

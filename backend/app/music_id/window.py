@@ -57,9 +57,18 @@ def cut_window(
     dst_path: Path,
     start_s: float,
     end_s: float,
+    gain: float = 1.0,
 ) -> None:
-    """Write the [start_s, end_s) slice of src_path to dst_path."""
+    """Write the [start_s, end_s) slice of src_path to dst_path.
+
+    If `gain` != 1.0, the slice is multiplied by `gain` and hard-clipped to
+    [-1, 1] before writing. Used so AudD receives the amplified clip that
+    matches what the user is hearing.
+    """
     audio, sr = sf.read(str(src_path), always_2d=True)
     s = max(0, int(start_s * sr))
     e = min(len(audio), int(end_s * sr))
-    sf.write(str(dst_path), audio[s:e], sr)
+    slice_ = audio[s:e]
+    if gain != 1.0:
+        slice_ = np.clip(slice_ * float(gain), -1.0, 1.0)
+    sf.write(str(dst_path), slice_, sr)

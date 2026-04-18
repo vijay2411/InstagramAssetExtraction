@@ -28,6 +28,10 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
   // Auto-cut if windowStart is null.
   const maxStart = Math.max(0, Math.floor(music.duration - windowLen));
 
+  // Playback gain. Shared with AudD fingerprint — whatever the user is
+  // hearing is what gets sent for matching. Range 0.5x – 4.0x.
+  const [gain, setGain] = useState(1.0);
+
   // Case 2 = Instagram has already tagged a known song on the reel (either
   // via yt-dlp's own metadata or via our embed-page fallback scrape).
   const isCase2 = !!song && (song.source === 'yt_dlp_meta' || song.source === 'ig_embed');
@@ -39,7 +43,10 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
     setBusy(true);
     setErr(null);
     try {
-      const body: { start_s?: number; window_s?: number } = { window_s: windowLen };
+      const body: { start_s?: number; window_s?: number; gain?: number } = {
+        window_s: windowLen,
+        gain,  // send the current slider value so AudD fingerprints what you hear
+      };
       if (windowStart !== null) body.start_s = windowStart;
       const resp: IdentifyMusicResponse = await api.identifyMusic(jobId, body);
       if (resp.matched && resp.song) {
@@ -112,8 +119,11 @@ export function MusicCard({ manifest, jobId, jobDirName }: Props) {
           </a>
         </div>
 
-        {/* Waveform */}
-        <Waveform url={musicUrl} color={MUSIC_HEX} />
+        {/* Waveform + gain slider */}
+        <div className="space-y-3">
+          <Waveform url={musicUrl} color={MUSIC_HEX} gain={gain} />
+          <GainSlider gain={gain} onChange={setGain} />
+        </div>
 
         {/* Streaming links — shown when we have a song, any source */}
         {song && (
@@ -285,5 +295,35 @@ function StreamLink({ href, label }: { href: string; label: string }) {
         <path d="M3 7l4-4M7 3H3.5M7 3v3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="text-music" />
       </svg>
     </motion.a>
+  );
+}
+
+function GainSlider({ gain, onChange }: { gain: number; onChange: (v: number) => void }) {
+  const clipping = gain > 2.5;
+  return (
+    <div className="flex items-center gap-3 px-1">
+      <button
+        onClick={() => onChange(1.0)}
+        title="Reset to unity"
+        className={`font-mono text-[9px] uppercase tracking-[0.2em] transition-colors
+                    ${gain === 1.0 ? 'text-text-mute/60' : 'text-ember hover:text-ember-hot'}`}
+      >
+        boost
+      </button>
+      <input
+        type="range"
+        min={0.5}
+        max={4}
+        step={0.05}
+        value={gain}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 accent-ember h-1"
+        aria-label="Music playback gain"
+      />
+      <span className={`font-mono tabular text-[11px] w-12 text-right transition-colors
+                        ${clipping ? 'text-coral' : gain === 1.0 ? 'text-text-mute' : 'text-ember'}`}>
+        {gain.toFixed(2)}×
+      </span>
+    </div>
   );
 }

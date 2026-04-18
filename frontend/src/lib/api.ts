@@ -38,7 +38,7 @@ export interface Manifest {
 
 export interface IdentifyMusicResponse {
   matched: boolean;
-  window: { start_s: number; end_s: number; auto: boolean };
+  window: { start_s: number; end_s: number; auto: boolean; gain?: number };
   song?: Song;
 }
 
@@ -61,7 +61,10 @@ export const api = {
   getCurrentJob: () => req<any>('/api/jobs/current'),
   cancelJob: (job_id: string) =>
     req<{ ok: boolean }>(`/api/jobs/${job_id}/cancel`, { method: 'POST' }),
-  identifyMusic: (job_id: string, body: { start_s?: number; window_s?: number } = {}) =>
+  identifyMusic: (
+    job_id: string,
+    body: { start_s?: number; window_s?: number; gain?: number } = {},
+  ) =>
     req<IdentifyMusicResponse>(`/api/jobs/${job_id}/identify-music`, {
       method: 'POST',
       body: JSON.stringify(body),

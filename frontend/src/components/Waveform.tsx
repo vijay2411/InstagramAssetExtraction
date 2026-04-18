@@ -11,14 +11,17 @@ interface Props {
   color: string;        // hex or css color
   waveColor?: string;
   height?: number;
+  gain?: number;        // 1.0 = unity; scales both audio and visual bars.
 }
 
 export const Waveform = forwardRef<WaveformHandle, Props>(function Waveform(
-  { url, color, waveColor, height = 72 },
+  { url, color, waveColor, height = 72, gain = 1.0 },
   ref,
 ) {
   const el = useRef<HTMLDivElement>(null);
   const ws = useRef<WaveSurfer | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const gainNode = useRef<GainNode | null>(null);
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -33,17 +36,68 @@ export const Waveform = forwardRef<WaveformHandle, Props>(function Waveform(
       barWidth: 2.5,
       barGap: 2.5,
       barRadius: 2,
-      cursorColor: `${color}`,
+      barHeight: gain,           // initial visual gain
+      cursorColor: color,
       cursorWidth: 2,
       interact: true,
     });
-    instance.on('ready', () => setReady(true));
-    instance.on('play',   () => setPlaying(true));
+
+    instance.on('ready', () => {
+      setReady(true);
+      // Wire Web Audio gain AFTER ready, once wavesurfer's internal audio
+      // element is constructed. We tap into it with createMediaElementSource
+      // and insert a GainNode between source and destination.
+      try {
+        const media = (instance as unknown as { getMediaElement: () => HTMLMediaElement }).getMediaElement?.();
+        if (media && !audioCtx.current) {
+          const AC = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AC();
+          const src = ctx.createMediaElementSource(media);
+          const gn = ctx.createGain();
+          gn.gain.value = gain;
+          src.connect(gn);
+          gn.connect(ctx.destination);
+          audioCtx.current = ctx;
+          gainNode.current = gn;
+        }
+      } catch {
+        // If already connected (re-mount in dev), silently ignore.
+      }
+    });
+    instance.on('play', () => {
+      // Autoplay policies: resume the context on first play gesture.
+      audioCtx.current?.resume().catch(() => {});
+      setPlaying(true);
+    });
     instance.on('pause',  () => setPlaying(false));
     instance.on('finish', () => setPlaying(false));
     ws.current = instance;
-    return () => { instance.destroy(); };
+    return () => {
+      instance.destroy();
+      audioCtx.current?.close().catch(() => {});
+      audioCtx.current = null;
+      gainNode.current = null;
+    };
+    // gain deliberately NOT in deps — we mutate it via the effect below
+    // instead of tearing down wavesurfer every time the slider moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, color, waveColor, height]);
+
+  // Live-update gain when the slider moves.
+  useEffect(() => {
+    if (!ws.current) return;
+    try {
+      (ws.current as unknown as { setOptions: (o: object) => void }).setOptions({ barHeight: gain });
+    } catch {
+      /* older wavesurfer */
+    }
+    if (gainNode.current) {
+      // Smooth a tiny ramp so changes don't click.
+      const ctx = audioCtx.current!;
+      gainNode.current.gain.cancelScheduledValues(ctx.currentTime);
+      gainNode.current.gain.setTargetAtTime(gain, ctx.currentTime, 0.02);
+    }
+  }, [gain]);
 
   useImperativeHandle(ref, () => ({
     playPause: () => ws.current?.playPause(),
@@ -51,7 +105,6 @@ export const Waveform = forwardRef<WaveformHandle, Props>(function Waveform(
 
   return (
     <div className="flex items-center gap-4">
-      {/* Larger play button with color ring + glow */}
       <motion.button
         whileHover={{ scale: 1.04 }}
         whileTap={{ scale: 0.94 }}
@@ -83,7 +136,6 @@ export const Waveform = forwardRef<WaveformHandle, Props>(function Waveform(
             }}
           />
         )}
-        {/* Outer pulse ring while playing */}
         {playing && (
           <motion.div
             initial={{ scale: 1, opacity: 0.6 }}
@@ -96,7 +148,6 @@ export const Waveform = forwardRef<WaveformHandle, Props>(function Waveform(
       </motion.button>
 
       <div className="flex-1 min-w-0 relative">
-        {/* Skeleton until wavesurfer decodes */}
         {!ready && (
           <div className="absolute inset-0 flex items-center gap-1">
             {Array.from({ length: 48 }).map((_, i) => (
