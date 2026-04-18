@@ -60,6 +60,11 @@ class SfxStage:
         dist_threshold = float(
             ctx.params.get("cluster_dist_threshold", DEFAULT_CLUSTER_DIST_THRESHOLD)
         )
+        # Beat-grid filter reference (typically the pre-subtraction music.wav).
+        # When set, we detect the song's beat positions and reject onsets that
+        # land on-beat — those are almost always leaked drum hits rather than
+        # creator-added SFX. Skipped automatically on arrhythmic tracks.
+        beat_ref = ctx.params.get("beat_reference_path")
 
         ctx.emit(StageEvent(type="progress", stage=self.name, progress=0.0, message="loading audio"))
 
@@ -69,6 +74,48 @@ class SfxStage:
         onsets = librosa.onset.onset_detect(y=y, sr=sr, units="samples", backtrack=True)
         clip_min = int(sr * clip_min_ms / 1000)
         clip_max = int(sr * clip_max_ms / 1000)
+
+        # Apply beat-grid filter if a reference was supplied. We compute a
+        # boolean mask on the onset-samples-in-seconds array and apply it
+        # directly — no float equality games.
+        beat_info = {"applied": False, "dropped": 0, "total": len(onsets), "tempo": None}
+        if beat_ref and len(onsets) > 0:
+            try:
+                from app.sfx_extract.beat_filter import find_beats, off_beat_mask
+                grid = find_beats(Path(beat_ref))
+                if grid.has_beat:
+                    onset_times_s = onsets / float(sr)
+                    # Use every music onset (drum hits, note attacks) as the
+                    # reject grid, not just detected beats. That's where
+                    # leaked residue lives.
+                    mask = off_beat_mask(onset_times_s, grid.onset_times_s)
+                    before = len(onsets)
+                    onsets = onsets[mask]
+                    beat_info = {
+                        "applied": True,
+                        "dropped": int(before - len(onsets)),
+                        "total": int(before),
+                        "tempo": round(float(grid.tempo_bpm), 1),
+                        "n_music_onsets": int(len(grid.onset_times_s)),
+                    }
+                    ctx.emit(StageEvent(
+                        type="progress", stage=self.name, progress=0.3,
+                        message=(
+                            f"onset-grid filter ({beat_info['n_music_onsets']} music onsets @ "
+                            f"{beat_info['tempo']} bpm): dropped {beat_info['dropped']}/{beat_info['total']}, "
+                            f"{len(onsets)} survive"
+                        ),
+                    ))
+                else:
+                    ctx.emit(StageEvent(
+                        type="progress", stage=self.name, progress=0.3,
+                        message=f"beat filter: arrhythmic track (conf={grid.confidence:.2f}) — skipped",
+                    ))
+            except Exception as e:
+                ctx.emit(StageEvent(
+                    type="progress", stage=self.name, progress=0.3,
+                    message=f"beat filter error, continuing unfiltered: {str(e)[:100]}",
+                ))
 
         clips: list[dict] = []
         for i, start in enumerate(onsets):
@@ -110,8 +157,32 @@ class SfxStage:
             for idx, label in enumerate(labels):
                 groups.setdefault(int(label), []).append(idx)
 
-            kept = [(label, indices) for label, indices in groups.items() if len(indices) >= min_members]
+            # Density filter: genuine creator-added SFX repeat maybe once per
+            # 2-10 seconds. Anything denser than ~1 per second is almost
+            # certainly a rhythmic pattern (drums, hi-hats, bass bursts) that
+            # leaked through subtraction, not an isolated sound effect.
+            # Default off (very high) — backward compat with synthetic tests
+            # that cluster many SFX in a short fixture. Orchestrator opts in
+            # to a stricter value (~1.0/s) for real-world residuals.
+            max_density = float(ctx.params.get("max_cluster_density_per_s", 999.0))
+            kept: list[tuple[int, list[int]]] = []
+            rejected_dense = 0
+            for label, indices in groups.items():
+                if len(indices) < min_members:
+                    continue
+                starts = sorted(clips[i]["start_s"] for i in indices)
+                span = max(0.001, starts[-1] - starts[0])
+                density = len(indices) / span
+                if density > max_density:
+                    rejected_dense += 1
+                    continue
+                kept.append((label, indices))
             kept.sort(key=lambda x: len(x[1]), reverse=True)
+            if rejected_dense > 0:
+                ctx.emit(StageEvent(
+                    type="progress", stage=self.name, progress=0.6,
+                    message=f"dropped {rejected_dense} rhythm-pattern clusters (density > {max_density}/s)",
+                ))
 
             y_stereo, sr_stereo = sf.read(str(non_speech))
             if y_stereo.ndim == 1:

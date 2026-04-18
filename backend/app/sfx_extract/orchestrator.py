@@ -194,21 +194,36 @@ def extract_sfx(
 
     # Reuse SfxStage but point it at the residual instead of non_speech.
     # Explicitly enable — the stage default is off because the naive
-    # mining on the raw non_speech stem confuses drum hits as SFX, but
-    # the residual here has already had the drums subtracted.
+    # mining on the raw non_speech stem confuses drum hits as SFX.
+    #
+    # Also pass music_path as beat-reference so the stage filters out any
+    # leaked drum hits still in the residual (they'll land ON the song's
+    # beat grid; real creator-added SFX lands OFF-beat on video cuts).
     params = dict(sfx_params or {})
     params.setdefault("sfx_enabled", True)
     params.setdefault("min_cluster_size", 2)
     params.setdefault("clip_min_ms", 300)
     params.setdefault("clip_max_ms", 1500)
-    params.setdefault("cluster_dist_threshold", 0.35)
+    # Tighter cluster threshold for residuals — subtraction-artifact onsets
+    # look very similar to each other and need more discrimination to
+    # separate distinct SFX.
+    params.setdefault("cluster_dist_threshold", 0.15)
+    params.setdefault("beat_reference_path", str(music_path))
+    # Reject rhythm-pattern clusters (repeating more than 1x/sec = drums,
+    # not a creator-added SFX).
+    params.setdefault("max_cluster_density_per_s", 1.0)
+
+    # Forward the SfxStage's own StageEvents out as sfx_extract.progress
+    # messages so the beat-filter's stats line shows up in the live stream.
+    def _forward(event: StageEvent) -> None:
+        _emit(emit, "mine", 0.5, event.message or "")
 
     ctx = JobContext(
         job_id="sfx-extract",
         job_dir=job_dir,
         inputs={"non_speech": residual_path},
         params=params,
-        emit=lambda _e: None,  # swallow inner stage events; we emit our own
+        emit=_forward,
     )
     sfx_result = SfxStage().run(ctx)
     sfx_count = int(sfx_result.extra.get("sfx_count", 0))
